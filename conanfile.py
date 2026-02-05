@@ -16,7 +16,7 @@ class ConcoreRecipe(ConanFile):
     license = "MIT"
 
     settings = "os", "compiler", "build_type", "arch"
-    generators = "CMakeDeps", "CMakeToolchain"
+    # generators = "CMakeDeps", "CMakeToolchain"
 
     options = {
         "shared": [True, False],
