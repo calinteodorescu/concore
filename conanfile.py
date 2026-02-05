@@ -1,64 +1,111 @@
-from conans import ConanFile, CMake, tools
+﻿from conan import ConanFile
+from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
+from conan.tools.files import load
+from conan.tools.env import VirtualBuildEnv
 import re
 from os import path
 
+
 class ConcoreRecipe(ConanFile):
-   name = "concore"
-   description = "Core abstractions for dealing with concurrency in C++"
-   author = "Lucian Radu Teodorescu"
-   topics = ("concurrency", "tasks", "executors", "no-locks")
-   homepage = "https://github.com/lucteo/concore"
-   url = "https://github.com/lucteo/concore"
-   license = "MIT"
+    name = "concore"
+    description = "Core abstractions for dealing with concurrency in C++"
+    author = "Lucian Radu Teodorescu"
+    topics = ("concurrency", "tasks", "executors", "no-locks")
+    homepage = "https://github.com/lucteo/concore"
+    url = "https://github.com/lucteo/concore"
+    license = "MIT"
 
-   settings = "os", "compiler", "build_type", "arch"
-   generators = "cmake"
-   build_policy = "missing"   # Some of the dependencies don't have builds for all our targets
+    settings = "os", "compiler", "build_type", "arch"
+    generators = "CMakeDeps", "CMakeToolchain"
 
-   options = {"shared": [True, False], "fPIC": [True, False]}
-   default_options = {"shared": False, "fPIC": True, "catch2:with_main": True}
+    options = {
+        "shared": [True, False],
+        "fPIC": [True, False],
+    }
+    default_options = {
+        "shared": False,
+        "fPIC": True,
+    }
 
-   exports = "LICENSE"
-   exports_sources = ("src/*", "include/*", "CMakeLists.txt")
+    # We export the license and all source files needed to build
+    exports_sources = ("src/*", "include/*", "CMakeLists.txt", "LICENSE")
 
-   def set_version(self):
-      # Get the version from src/CMakeList.txt project definition
-      content = tools.load(path.join(self.recipe_folder, "src/CMakeLists.txt"))
-      version = re.search(r"project\([^\)]+VERSION (\d+\.\d+\.\d+)[^\)]*\)", content).group(1)
-      self.version = version.strip()
+    # We no longer use the old "cmake" generator
+    # build_policy = "missing"  → no longer needed in Conan 2 (handled by --build)
 
-   @property
-   def _run_tests(self):
-       return tools.get_env("CONAN_RUN_TESTS", False)
+    def set_version(self):
+        # Extract version from src/CMakeLists.txt
+        cmake_content = load(self, path.join(self.recipe_folder, "src", "CMakeLists.txt"))
+        match = re.search(r"project\([^\)]+VERSION (\d+\.\d+\.\d+)[^\)]*\)", cmake_content)
+        if match:
+            self.version = match.group(1).strip()
+        else:
+            raise ValueError("Could not extract version from CMakeLists.txt")
 
-   def build_requirements(self):
-      if self._run_tests:
-         self.build_requires("catch2/2.13.6")
-         self.build_requires("rapidcheck/20210107")
-         self.build_requires("benchmark/1.5.3")
+    @property
+    def _run_tests(self):
+        # You can control this via environment variable or profile
+        return self.conf.get("user.concore:run_tests", False, check_type=bool)
 
-   def config_options(self):
-       if self.settings.os == "Windows":
-           del self.options.fPIC
+    def requirements(self):
+        # Put runtime dependencies here (none in your original)
+        pass
 
-   def build(self):
-      # Note: options "shared" and "fPIC" are automatically handled in CMake
-      cmake = self._configure_cmake()
-      cmake.build()
+    def build_requirements(self):
+        if self._run_tests:
+            self.build_requires("catch2/3.8.0")          # updated to newer version
+            self.build_requires("rapidcheck/cci.20230524")  # use latest available
+            self.build_requires("benchmark/1.9.0")      # updated
 
-   def package(self):
-      self.copy(pattern="LICENSE", dst="licenses")
-      cmake = self._configure_cmake()
-      cmake.install()
+    def config_options(self):
+        if self.settings.os == "Windows":
+            del self.options.fPIC
 
-   def package_info(self):
-      self.cpp_info.libs = self.collect_libs()
+    def layout(self):
+        cmake_layout(self)
 
-   def _configure_cmake(self):
-      cmake = CMake(self)
-      if self.settings.compiler == "Visual Studio" and self.options.shared:
-         cmake.definitions["CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS"] = True
-      cmake.configure(source_folder=None if self._run_tests else "src")
-      return cmake
+    def generate(self):
+        tc = CMakeToolchain(self)
 
+        # Preserve your special handling for shared libs on Windows
+        if self.settings.compiler == "msvc" and self.options.shared:
+            tc.variables["CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS"] = True
 
+        # You can add more variables if needed
+        # tc.variables["SOME_OPTION"] = "ON"
+
+        tc.generate()
+
+        deps = CMakeDeps(self)
+        deps.generate()
+
+        # Optional: if you need build environment variables
+        VirtualBuildEnv(self).generate(scope="build")
+
+    def build(self):
+        cmake = CMake(self)
+
+        # In Conan 2, source_folder is handled by layout
+        # We build the whole project (including tests if dependencies are present)
+        cmake.configure()
+
+        cmake.build()
+
+        # Optional: run tests during build if desired
+        # if self._run_tests:
+        #     cmake.test()
+
+    def package(self):
+        # Copy license
+        self.copy("LICENSE", dst="licenses")
+
+        # Install using CMake (this runs `cmake --install`)
+        cmake = CMake(self)
+        cmake.install()
+
+    def package_info(self):
+        # Conan 2 style — collect libraries automatically
+        self.cpp_info.libs = self.cpp_info.collect_libs()
+
+        # If needed you can be more explicit:
+        # self.cpp_info.components["concore"].libs = ["concore"]
