@@ -48,3 +48,5 @@ src/include/concore/version.hpp
 docs/_build
 docs/doxygen_out
 docs/api/
+/.vs/concore.slnx/v18
+/.vs
